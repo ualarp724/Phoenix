@@ -8,90 +8,122 @@ import pandas as pd
 import joblib
 import warnings
 import os
+import time
+import gc # Garbage Collector
 from phoenix_processor import PhoenixDataProcessor
 import phoenix_config as config
 
-# 1. SILENCIAR ADVERTENCIAS DE INFRAESTRUCTURA
-warnings.filterwarnings("ignore", message=".*pin_memory.*")
+# --- CONFIGURACIÓN DE MEMORIA APPLE SILICON ---
+# Permite usar toda la memoria disponible sin límites artificiales
+os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+warnings.filterwarnings("ignore")
 
-# 2. DEFINICIÓN DE ARQUITECTURA
+# --- ARQUITECTURA NEURONAL ---
 class PhoenixLSTM(nn.Module):
     def __init__(self, input_size, hidden_layers, num_classes):
         super(PhoenixLSTM, self).__init__()
         self.lstm = nn.LSTM(input_size, hidden_layers[0], batch_first=True, num_layers=3, dropout=0.3)
-        self.fc = nn.Linear(hidden_layers[0], num_classes)
+        self.fc_1 = nn.Linear(hidden_layers[0], hidden_layers[1])
+        self.relu = nn.ReLU()
+        self.fc_2 = nn.Linear(hidden_layers[1], num_classes)
         
     def forward(self, x):
         out, _ = self.lstm(x)
-        return self.fc(out[:, -1, :])
+        out = out[:, -1, :] 
+        out = self.fc_1(out)
+        out = self.relu(out)
+        return self.fc_2(out)
 
-def preparar_secuencias(df):
-    features = ['Open', 'High', 'Low', 'Close', 'Returns', 'Z_Score_Vol']
-    data = df[features].values
-    target = df['Target'].values
+def preparar_datos_sin_fuga(df):
+    future_window = 5 
+    min_profit_factor = 1.0 
+    future_return = df['Close'].shift(-future_window) - df['Close']
+    df['Target'] = 0
+    df.loc[future_return > (df['ATR'] * min_profit_factor), 'Target'] = 1 
+    df.loc[future_return < -(df['ATR'] * min_profit_factor), 'Target'] = 2 
+    df.dropna(inplace=True)
 
+    split_idx = int(len(df) * 0.8)
+    train_df = df.iloc[:split_idx]
+    test_df = df.iloc[split_idx:]
+    
+    features = ['Open', 'High', 'Low', 'Close', 'Volume', 'ATR', 'Vol_Z', 'Dist_EMA200']
     scaler = StandardScaler()
-    data_scaled = scaler.fit_transform(data)
+    X_train_scaled = scaler.fit_transform(train_df[features])
+    X_test_scaled = scaler.transform(test_df[features]) 
+    joblib.dump(scaler, config.SCALER_SAVE_PATH)
+    
+    # Vectorización
+    def create_sequences_vectorized(data, targets, seq_length):
+        data = np.ascontiguousarray(data)
+        num_samples = len(data) - seq_length
+        shape = (num_samples, seq_length, data.shape[1])
+        strides = (data.strides[0], data.strides[0], data.strides[1])
+        X = np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
+        y = targets[seq_length:]
+        if len(y) > len(X): y = y[:len(X)]
+        if len(X) > len(y): X = X[:len(y)]
+        return X, y
 
-    lookback = config.LOOKBACK_WINDOW
-    # Vectorización de alta velocidad
-    X = np.array([data_scaled[i : i + lookback] for i in range(len(data_scaled) - lookback)])
-    y = target[lookback:]
-        
-    return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long), scaler
+    X_train, y_train = create_sequences_vectorized(X_train_scaled, train_df['Target'].values, config.LOOKBACK_WINDOW)
+    X_test, y_test = create_sequences_vectorized(X_test_scaled, test_df['Target'].values, config.LOOKBACK_WINDOW)
+
+    return (torch.tensor(X_train.copy()).float(), torch.tensor(y_train.copy()).long(), 
+            torch.tensor(X_test.copy()).float(), torch.tensor(y_test.copy()).long())
 
 def entrenar():
-    # Detectar dispositivo una sola vez
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    
-    # Logs iniciales de administración
-    print(f"--- [EJECUCIÓN] Iniciando Motor Phoenix | Dispositivo: {device} ---")
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+        print(f"\n{'='*50}")
+        print(f"🚀 MODO TURBO (ESTABLE): Usando Apple M4 (Metal)")
+        print(f"{'='*50}\n")
+    else:
+        device = torch.device("cpu")
+        print("⚠️ Usando CPU")
     
     processor = PhoenixDataProcessor(config.DATA_RAW)
     df = processor.clean_and_prepare()
     
-    X, y, scaler = preparar_secuencias(df)
+    X_train, y_train, X_test, y_test = preparar_datos_sin_fuga(df)
     
-    split = int(len(X) * 0.8)
-    dataset_train = TensorDataset(X[:split], y[:split])
+    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=config.BATCH_SIZE, shuffle=True, num_workers=0)
+    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=config.BATCH_SIZE, shuffle=False)
 
-    # OPTIMIZACIÓN MÁXIMA: Batch Size de 2048 para estrujar la RAM de 16GB
-    loader = DataLoader(
-        dataset_train, 
-        batch_size=2048, 
-        shuffle=True, 
-        num_workers=4, 
-        pin_memory=True,
-        persistent_workers=True # Mantiene los hilos vivos para evitar latencia
-    )
-
-    model = PhoenixLSTM(input_size=6, hidden_layers=config.HIDDEN_LAYERS, num_classes=3).to(device)
-    criterion = nn.CrossEntropyLoss()
+    model = PhoenixLSTM(input_size=8, hidden_layers=config.HIDDEN_LAYERS, num_classes=3).to(device)
+    class_weights = torch.tensor([0.2, 2.0, 2.0]).to(device) 
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
 
-    print(f"--- [TRAINING] Procesando {len(X)} secuencias de Oro ---")
+    print(f"--- [TRAINING] Iniciando... ---")
+    start_time = time.time()
     
-    model.train()
     for epoch in range(config.EPOCHS):
-        total_loss = 0
-        for batch_X, batch_y in loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-            
+        model.train()
+        train_loss = 0
+        
+        for X_batch, y_batch in train_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
-            outputs = model(batch_X)
-            loss = criterion(outputs, batch_y)
+            output = model(X_batch)
+            loss = criterion(output, y_batch)
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
-        
-        # Output limpio de alta dirección
-        if (epoch + 1) % 5 == 0:
-            print(f"Época [{epoch+1}/{config.EPOCHS}] - Loss: {total_loss/len(loader):.4f}")
+            train_loss += loss.item()
+            
+        # --- LIMPIEZA DE MEMORIA VRAM ---
+        # Esto libera la memoria 'basura' que queda tras cada epoca
+        if device.type == 'mps':
+            torch.mps.empty_cache()
+            gc.collect()
+        # --------------------------------
 
-    # Guardado de activos
-    torch.save(model.to("cpu").state_dict(), config.MODEL_SAVE_PATH)
-    joblib.dump(scaler, "phoenix_scaler.pkl")
-    print(f"--- [EXITO] Modelo consolidado en {config.MODEL_SAVE_PATH} ---")
+        if (epoch+1) % 1 == 0: 
+            elapsed = time.time() - start_time
+            print(f"✅ Epoch {epoch+1}/{config.EPOCHS} | Loss: {train_loss/len(train_loader):.4f} | Tiempo: {elapsed:.1f}s")
+
+    torch.save(model.state_dict(), config.MODEL_SAVE_PATH)
+    print(f"--- [EXITO] Guardado en {config.MODEL_SAVE_PATH} ---")
 
 if __name__ == "__main__":
     entrenar()

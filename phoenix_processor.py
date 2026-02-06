@@ -1,71 +1,78 @@
 import pandas as pd
 import numpy as np
-import os
-from phoenix_config import SPREAD_MAXIMO
+import phoenix_config as config
 
 class PhoenixDataProcessor:
     def __init__(self, file_path):
         self.file_path = file_path
 
     def clean_and_prepare(self):
-        print(f"--- [PROCESADOR] Analizando estructura de {self.file_path} ---")
+        print(f"--- [PROCESADOR] Iniciando Protocolo de Datos: {self.file_path} ---")
         
-        # 1. Carga con detección de separador (Vantage usa tabuladores \t)
-        df = pd.read_csv(self.file_path, sep='\t') 
+        # 1. Carga Inteligente
+        try:
+            df = pd.read_csv(self.file_path, sep='\t')
+            if len(df.columns) < 2: 
+                df = pd.read_csv(self.file_path, sep=',')
+        except Exception as e:
+            raise ValueError(f"Error crítico leyendo archivo: {e}")
 
-        # 2. Mapeo de columnas estilo Vantage/MetaTrader
-        # Buscamos las columnas que contienen los nombres clave ignorando los <>
+        # 2. Estandarización de Nombres
         col_map = {}
         for col in df.columns:
-            c_clean = col.replace('<', '').replace('>', '').upper()
-            if 'DATE' in c_clean: col_map[col] = 'Date'
-            elif 'TIME' in c_clean: col_map[col] = 'Time'
-            elif 'OPEN' in c_clean: col_map[col] = 'Open'
-            elif 'HIGH' in c_clean: col_map[col] = 'High'
-            elif 'LOW' in c_clean: col_map[col] = 'Low'
-            elif 'CLOSE' in c_clean: col_map[col] = 'Close'
-            elif 'VOL' in c_clean or 'TICKVOL' in c_clean: col_map[col] = 'Volume'
-
+            c = col.upper().replace('<', '').replace('>', '')
+            if 'DATE' in c: col_map[col] = 'Date'
+            elif 'TIME' in c: col_map[col] = 'Time'
+            elif 'OPEN' in c: col_map[col] = 'Open'
+            elif 'HIGH' in c: col_map[col] = 'High'
+            elif 'LOW' in c: col_map[col] = 'Low'
+            elif 'CLOSE' in c: col_map[col] = 'Close'
+            elif 'VOL' in c: col_map[col] = 'Volume'
+        
         df = df.rename(columns=col_map)
-
-        # 3. Creación del Datetime unificado (Date + Time)
-        print("   > Combinando Date y Time...")
-        df['Datetime'] = pd.to_datetime(df['Date'] + ' ' + df['Time'])
+        
+        # --- FIX CRÍTICO: Eliminar columnas duplicadas (ej. doble volumen) ---
+        df = df.loc[:, ~df.columns.duplicated()]
+        # ---------------------------------------------------------------------
+        
+        # 3. Datetime Unificado
+        if 'Time' in df.columns:
+            df['Datetime'] = pd.to_datetime(df['Date'] + ' ' + df['Time'])
+        else:
+            df['Datetime'] = pd.to_datetime(df['Date'])
+        
         df.set_index('Datetime', inplace=True)
         
-        # Limpieza de columnas sobrantes
-        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        # Asegurar tipos float
+        cols_float = ['Open', 'High', 'Low', 'Close', 'Volume']
+        df = df[cols_float].astype(float)
 
-        # --- FEATURE ENGINEERING (Nivel Senior) ---
-        print("   > Generando Indicadores Cuánticos...")
+        # --- FEATURE ENGINEERING ---
         
-        # Retornos logarítmicos
-        df['Returns'] = np.log(df['Close'] / df['Close'].shift(1))
+        # A. ATR
+        prev_close = df['Close'].shift(1)
+        tr1 = df['High'] - df['Low']
+        tr2 = (df['High'] - prev_close).abs()
+        tr3 = (df['Low'] - prev_close).abs()
         
-        # Z-Score de Volatilidad (20 periodos)
-        df['Std_20'] = df['Returns'].rolling(window=20).std()
-        df['Z_Score_Vol'] = (df['Std_20'] - df['Std_20'].rolling(window=100).mean()) / \
-                            df['Std_20'].rolling(window=100).std()
+        df['TR'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        df['ATR'] = df['TR'].rolling(window=config.ATR_PERIOD).mean()
 
-        # 4. Target para la IA (Ajustado por Spread Real de Vantage)
-        # En Oro, un movimiento de 0.25 cubre comisión y spread sobradamente
-        df['Cost_Threshold'] = 1 
-        df['Target'] = 0 # Neutro
+        # B. Retornos Logarítmicos
+        df['Log_Ret'] = np.log(df['Close'] / prev_close)
         
-        # Miramos 5 velas al futuro (Scalping)
-        future_move = df['Close'].shift(-5) - df['Close']
-        df.loc[future_move > df['Cost_Threshold'], 'Target'] = 1 # COMPRA
-        df.loc[future_move < -df['Cost_Threshold'], 'Target'] = 2 # VENTA
+        # C. Z-Score
+        roll_std = df['Log_Ret'].rolling(window=20).std()
+        df['Vol_Z'] = (roll_std - roll_std.rolling(window=100).mean()) / roll_std.rolling(window=100).std()
+        
+        # D. Distancia EMA200
+        df['Dist_EMA200'] = df['Close'] - df['Close'].ewm(span=200).mean()
 
         df.dropna(inplace=True)
+        print(f"   > Datos procesados. Velas útiles: {len(df)}")
         return df
 
 if __name__ == "__main__":
-    if not os.path.exists("vantage_gold.csv"):
-        print("[ERROR] No encuentro vantage_gold.csv. Asegúrate de que esté en la carpeta.")
-    else:
-        processor = PhoenixDataProcessor("vantage_gold.csv")
-        data = processor.clean_and_prepare()
-        print(f"\n[EXITO] Datos procesados correctamente.")
-        print(f"Total de velas: {len(data)}")
-        print(f"Distribución de Targets (IA):\n{data['Target'].value_counts()}")
+    processor = PhoenixDataProcessor(config.DATA_RAW)
+    df = processor.clean_and_prepare()
+    print(df.tail())
