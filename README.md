@@ -44,4 +44,13 @@ pytest
 | `vantage_nas100.csv` | NAS100 | M15 | Otros activos, más adelante |
 | `vantage_eurusd.csv` | EURUSD | M15 | Otros activos, más adelante |
 
-Los datos de feb–sep 2026 se reservan como test intocable (fase 4).
+Todas las horas se pasan a UTC (el servidor de Vantage va con Nueva York + 7 h).
+
+Periodos (ver `config/xauusd.json`):
+
+- **Desarrollo:** 15/11/2021 – 31/07/2025. Aquí se investiga (fase 3).
+- **Test intocable:** 01/08/2025 – 06/02/2026. Solo se abre en la fase 4 con
+  `holdout_data(..., i_know_this_is_the_final_test=True)`.
+- **Test 2:** feb–sep 2026, cuando se exporte de MT5.
+
+Informe de datos y costes: `python research/01_datos.py` → `research/01_datos.md`.

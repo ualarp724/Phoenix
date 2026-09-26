@@ -1,0 +1,35 @@
+{
+  "_comment": "Configuración de XAUUSD en la cuenta Vantage Raw ECN (USD). Ver el registro de decisiones del plan.",
+  "instrument": {
+    "symbol": "XAUUSD",
+    "point": 0.01,
+    "contract_size_oz": 100,
+    "lot_step": 0.01,
+    "min_lot": 0.01,
+    "max_lot": 0.03
+  },
+  "server_time": {
+    "_comment": "Vantage usa GMT+2 en invierno y GMT+3 en verano, cambiando con el horario de EE. UU.: hora servidor = hora de Nueva York + 7 h",
+    "offset_from_new_york_hours": 7
+  },
+  "costs": {
+    "commission_per_lot_per_side_usd": 3.0,
+    "spread_floor_usd": 0.12,
+    "slippage_per_market_fill_usd": 0.05,
+    "_comment": "El spread del CSV es el mínimo de cada vela y en 2021-2022 sale irrealmente bajo, por eso se usa max(spread de la vela, suelo). Calibrar con la demo (fase 5)."
+  },
+  "account": {
+    "currency": "USD",
+    "capital_eur": 200.0,
+    "eurusd_at_decision": 1.139,
+    "max_risk_per_trade_pct": 2.5,
+    "flat_before_daily_break": true
+  },
+  "splits": {
+    "_comment": "dev = desarrollo y walk-forward (fase 3). test = intocable hasta la fase 4. test_2 = feb-sep 2026 cuando se exporte de MT5.",
+    "dev_start": "2021-11-15",
+    "dev_end": "2025-07-31 23:59:59",
+    "test_start": "2025-08-01",
+    "test_end": "2026-02-06 23:59:59"
+  }
+}
