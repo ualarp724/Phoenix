@@ -59,3 +59,22 @@ Investigación (desde `research/`, cada script escribe su informe `.md`):
 - `02_walkforward.py`: primera tanda (azar, reglas simples, LightGBM)
 - `03_ruptura_y_movimiento.py`: segunda tanda (rupturas + modelo de movimiento)
 - `experiments.csv`: registro de todas las configuraciones probadas
+
+## Estudio aparte: Polymarket "Bitcoin Up or Down - 5 minutos"
+
+Código en `phoenix/btc5m/` (solo lectura de datos públicos y simulación; no envía órdenes):
+
+| Archivo | Qué hace |
+| --- | --- |
+| `binance.py` | Velas de 1 min de BTCUSDT (data.binance.vision) |
+| `coinbase.py` | Velas de 1 min de BTC-USD (Coinbase) |
+| `polymarket.py` | Mercados, resultado y operaciones alrededor del inicio |
+| `features.py` | Features en el momento de decidir y objetivo aproximado |
+| `backtest.py` | Apuestas a precios reales con comisión 0,07·p·(1−p) |
+| `model.py` | Entrenar / guardar / cargar el modelo (`models/`, fuera de git) |
+| `paper.py` | Bot en simulación en vivo (`python -m phoenix.btc5m.paper`) |
+
+Scripts: `research/05_descargar_btc5m.py` (descarga), `06_backtest_btc5m.py` (backtest),
+`07_retraso_chainlink.py` (retraso del precio de referencia). El resumen de precios por mercado
+está en `data/raw/polymarket_btc5m_resumen.csv.gz`, así que el backtest se puede repetir sin
+volver a descargar las operaciones. Desde España la API de Polymarket está bloqueada por la DGOJ.

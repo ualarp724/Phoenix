@@ -30,3 +30,7 @@ logs/
 *.db
 reports/
 *.png
+
+# --- Bot BTC 5m ---
+models/
+research/*.csv.gz
