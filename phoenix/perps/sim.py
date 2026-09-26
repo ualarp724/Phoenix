@@ -1,4 +1,4 @@
-"""Simulador de un futuro perpetuo de BTC con apalancamiento, en velas de 4 horas.
+"""Simulador de un futuro perpetuo de BTC con apalancamiento, en velas de cualquier duración.
 
 Supuestos (Kraken, clientes del EEE, septiembre de 2026):
 - Apalancamiento máximo 10x. Margen de mantenimiento = 50 % del inicial (liquidación a ~5 %
@@ -7,7 +7,7 @@ Supuestos (Kraken, clientes del EEE, septiembre de 2026):
   deslizamiento 0,02 % en órdenes a mercado y stops.
 - Funding: los largos pagan 0,00125 %/h del nocional (media histórica ~0,01 % cada 8 h); a los
   cortos no se les abona nada (supuesto conservador).
-- Señales al cierre de una vela de 4 h, ejecución a la apertura de la siguiente.
+- Señales al cierre de una vela, ejecución a la apertura de la siguiente.
 - Dentro de una vela, si se tocan stop y objetivo, se asume el stop (peor caso).
 - Al llegar al objetivo (p. ej. 500 €) se cierra todo y se para. Si el capital baja del mínimo
   operable, también se para.
@@ -72,6 +72,7 @@ def run(bars4h: pd.DataFrame, strategy, start: pd.Timestamp, days: int = 30, cap
     """Simula una ventana de `days` días empezando en `start`. `strategy(state)` devuelve un Plan o None."""
     idx = bars4h.index
     rows = rows if rows is not None else bars4h.to_dict("records")
+    hours_per_bar = (idx[1] - idx[0]).total_seconds() / 3600
     i0 = idx.searchsorted(start)
     i1 = idx.searchsorted(start + pd.Timedelta(days=days))
     o, h, lo, c = (bars4h[k].to_numpy() for k in ("open", "high", "low", "close"))
@@ -131,8 +132,8 @@ def run(bars4h: pd.DataFrame, strategy, start: pd.Timestamp, days: int = 30, cap
                     close(tp, i, fee=maker)  # orden límite
                     curve.append((idx[i], equity))
                     return Result(equity, True, False, trades, liqs, curve)
-                if pos.side == 1:  # funding de 4 horas
-                    equity -= pos.qty * c[i] * costs.funding_long_per_hour * 4
+                if pos.side == 1:  # funding de la duración de la vela
+                    equity -= pos.qty * c[i] * costs.funding_long_per_hour * hours_per_bar
 
         mark = equity + (pos.side * pos.qty * (c[i] - pos.entry) if pos else 0.0)
         curve.append((idx[i], mark))

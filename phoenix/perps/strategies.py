@@ -12,18 +12,27 @@ import pandas as pd
 from phoenix.perps.sim import Plan
 
 
-def load_4h(bars1h: pd.DataFrame) -> pd.DataFrame:
-    """Velas de 4 h (00, 04, 08... UTC) a partir de las de 1 h, con indicadores."""
-    b = bars1h.resample("4h", label="left", closed="left").agg(
-        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna()
+def add_indicators(b: pd.DataFrame, ema_span: int = 300) -> pd.DataFrame:
+    """ATR(14), EMA de tendencia y canales de 10/20 velas ANTERIORES. Vale para cualquier marco."""
+    b = b.copy()
     prev = b["close"].shift()
     tr = pd.concat([b["high"] - b["low"], (b["high"] - prev).abs(), (b["low"] - prev).abs()], axis=1).max(axis=1)
     b["atr"] = tr.rolling(14).mean()
-    b["ema_trend"] = b["close"].ewm(span=300, adjust=False).mean()  # ~50 días
-    for n in (10, 20):
-        b[f"hi{n}"] = b["high"].shift(1).rolling(n).max()  # máximo de las n velas ANTERIORES
+    b["ema_trend"] = b["close"].ewm(span=ema_span, adjust=False).mean()
+    for n in (10, 20, 48):
+        b[f"hi{n}"] = b["high"].shift(1).rolling(n).max()
         b[f"lo{n}"] = b["low"].shift(1).rolling(n).min()
     return b
+
+
+def resample(bars: pd.DataFrame, rule: str) -> pd.DataFrame:
+    return bars.resample(rule, label="left", closed="left").agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna()
+
+
+def load_4h(bars1h: pd.DataFrame) -> pd.DataFrame:
+    """Velas de 4 h (00, 04, 08... UTC) con indicadores; la EMA de 300 velas son ~50 días."""
+    return add_indicators(resample(bars1h, "4h"), ema_span=300)
 
 
 def _lev(risk: float, entry: float, stop: float) -> float:
