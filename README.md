@@ -53,4 +53,9 @@ Periodos (ver `config/xauusd.json`):
   `holdout_data(..., i_know_this_is_the_final_test=True)`.
 - **Test 2:** feb–sep 2026, cuando se exporte de MT5.
 
-Informe de datos y costes: `python research/01_datos.py` → `research/01_datos.md`.
+Investigación (desde `research/`, cada script escribe su informe `.md`):
+
+- `01_datos.py`: calidad de datos y costes
+- `02_walkforward.py`: primera tanda (azar, reglas simples, LightGBM)
+- `03_ruptura_y_movimiento.py`: segunda tanda (rupturas + modelo de movimiento)
+- `experiments.csv`: registro de todas las configuraciones probadas
