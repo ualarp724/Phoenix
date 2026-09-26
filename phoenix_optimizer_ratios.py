@@ -1,9 +1,13 @@
+import phoenix_config as config
+
+if config.MODEL_TYPE == "xgboost":
+    raise SystemExit("Optimizer ratios LSTM no aplica en modo XGBoost.")
+
 import torch
 import pandas as pd
 import numpy as np
 import joblib
 import os
-import phoenix_config as config
 from phoenix_brain import PhoenixLSTM
 from phoenix_processor import PhoenixDataProcessor
 
@@ -12,7 +16,7 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 def cargar_modelo():
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    model = PhoenixLSTM(input_size=8, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
+    model = PhoenixLSTM(input_size=config.INPUT_SIZE, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
     try:
         model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
     except:
@@ -101,44 +105,11 @@ def test_ratio(model, scaler, df_test, sl_mult, tp_mult):
     return capital, max_dd, wins, total_ops
 
 def ejecutar_lab_ratios():
-    print(f"--- 🔬 LABORATORIO DE RATIOS (Umbral Fijo 0.85) ---")
-    
-    processor = PhoenixDataProcessor(config.DATA_RAW)
-    df = processor.clean_and_prepare()
-    df_test = df.iloc[int(len(df)*0.8):].copy()
-    scaler = joblib.load(config.SCALER_SAVE_PATH)
-    model = cargar_modelo()
-    
-    # MATRIZ DE PRUEBAS
-    sl_opts = [1.0, 1.5, 2.0]        # Stops más ajustados o más holgados
-    tp_opts = [1.5, 2.0, 3.0, 4.0]   # Targets conservadores o ambiciosos
-    
-    print(f"{'SL (xATR)':<10} | {'TP (xATR)':<10} | {'CAPITAL':<12} | {'MAX DD':<10} | {'OPS':<5}")
-    print("-" * 60)
-    
-    best_score = 0
-    best_cfg = ""
-    
-    for sl in sl_opts:
-        for tp in tp_opts:
-            # Filtro: El TP debe ser al menos igual al SL (Ratio 1:1 minimo)
-            if tp < sl: continue 
-            
-            cap, dd, wins, ops = test_ratio(model, scaler, df_test, sl, tp)
-            
-            # Score: Buscamos Ganancia pero penalizamos DD fuerte
-            # (Ganancia / DD) es una especie de Calmar Ratio simplificado
-            ganancia = cap - config.CAPITAL_INICIAL
-            score = ganancia / (dd + 0.01) 
-            
-            print(f"{sl:<10} | {tp:<10} | ${cap:<11.2f} | {dd*100:.1f}%     | {ops:<5}")
-            
-            if score > best_score:
-                best_score = score
-                best_cfg = f"SL {sl} / TP {tp}"
-                
-    print("-" * 60)
-    print(f"🥇 MEJOR BALANCE RIESGO/BENEFICIO: {best_cfg}")
+    from phoenix_parameter_optimizer_v2 import FastParameterOptimizer
+
+    print("⚠️  phoenix_optimizer_ratios.py está deprecado. Usando optimizer v2.")
+    optimizer = FastParameterOptimizer(config.MODEL_SAVE_PATH, config.SCALER_SAVE_PATH)
+    optimizer.optimizar()
 
 if __name__ == "__main__":
     ejecutar_lab_ratios()

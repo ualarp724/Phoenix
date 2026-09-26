@@ -1,0 +1,13 @@
+RSI
+Vol_Rel
+Trend_Score
+NATR
+BB_Width
+BB_Pos
+Dist_EMA
+M15_Trend_Score
+M15_RSI
+M15_BB_Pos
+H1_Trend_Score
+H1_RSI
+H1_BB_Pos

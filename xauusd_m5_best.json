@@ -1,0 +1,29 @@
+{
+  "name": "XAUUSD_M5_OPTUNA_BEST",
+  "source": "optuna_best.json",
+  "symbol": "XAUUSD",
+  "timeframe": "M5",
+  "params": {
+    "threshold": 0.19100153716580462,
+    "sl_mult": 1.4790540669956496,
+    "tp_mult": 1.5654568472090737,
+    "use_time_filter": false,
+    "hour_start": 10,
+    "hour_end": 20
+  },
+  "features": [
+    "RSI",
+    "Vol_Rel",
+    "Trend_Score",
+    "NATR",
+    "BB_Width",
+    "BB_Pos",
+    "Dist_EMA",
+    "M15_Trend_Score",
+    "M15_RSI",
+    "M15_BB_Pos",
+    "H1_Trend_Score",
+    "H1_RSI",
+    "H1_BB_Pos"
+  ]
+}

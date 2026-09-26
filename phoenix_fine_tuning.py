@@ -1,11 +1,3 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-import joblib
-import warnings
-from phoenix_processor import PhoenixDataProcessor
-from phoenix_brain import PhoenixLSTM, preparar_secuencias
 import phoenix_config as config
 
 # 1. CONFIGURACIÓN DE PRECISIÓN
@@ -14,6 +6,15 @@ EPOCHS_FT = 50
 BATCH_SIZE_FT = 2048
 
 def iniciar_perfeccionamiento():
+    if config.MODEL_TYPE == "xgboost":
+        print("⚠️ Fine-tuning LSTM no disponible en modo XGBoost.")
+        return
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import DataLoader, TensorDataset
+    from phoenix_processor import PhoenixDataProcessor
+    from phoenix_brain import PhoenixLSTM, preparar_secuencias
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     print(f"--- [EJECUCIÓN] Perfeccionando Cerebro Phoenix | Dispositivo: {device} ---")
     
@@ -27,7 +28,7 @@ def iniciar_perfeccionamiento():
     loader = DataLoader(dataset_train, batch_size=BATCH_SIZE_FT, shuffle=True, num_workers=4)
 
     # CARGAR MODELO EXISTENTE (EL QUE GANÓ $5,047)
-    model = PhoenixLSTM(input_size=6, hidden_layers=config.HIDDEN_LAYERS, num_classes=3).to(device)
+    model = PhoenixLSTM(input_size=config.INPUT_SIZE, hidden_layers=config.HIDDEN_LAYERS, num_classes=3).to(device)
     try:
         model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
         print("--- [INFO] Inteligencia previa cargada correctamente ---")

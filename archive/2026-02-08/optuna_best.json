@@ -1,0 +1,28 @@
+{
+  "score": 2.8008073642310265,
+  "params": {
+    "max_depth": 4,
+    "n_estimators": 550,
+    "learning_rate": 0.07156167661312729,
+    "min_child_weight": 24,
+    "gamma": 0.07813986732768911,
+    "subsample": 0.922527341976063,
+    "colsample_bytree": 0.76343204904729,
+    "reg_alpha": 0.08968991883376717,
+    "reg_lambda": 1.9274850235756338,
+    "max_delta_step": 0,
+    "threshold": 0.19100153716580462,
+    "sl_mult": 1.4790540669956496,
+    "tp_mult": 1.5654568472090737,
+    "use_time_filter": false,
+    "hour_start": 10,
+    "hour_end": 20
+  },
+  "metrics": {
+    "profit": 557.2943591850606,
+    "avg_daily": 3.0287736912231553,
+    "win_rate": 72.51184834123224,
+    "profit_factor": 2.797666332612931,
+    "max_drawdown_pct": 11.398316349606448
+  }
+}

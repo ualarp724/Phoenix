@@ -1,180 +1,115 @@
-import torch
 import pandas as pd
 import numpy as np
-import joblib
-import os
-from phoenix_processor import PhoenixDataProcessor
-from phoenix_brain import PhoenixLSTM
 import phoenix_config as config
 
-# --- CONFIGURACIÓN A AUDITAR (LA GANADORA) ---
-UMBRAL_CONFIANZA = 0.85
-ATR_SL = 1.5
-ATR_TP = 3.0
-CAPITAL_INICIAL = 200.0
-RIESGO_PCT = 0.02  # 2% Riesgo
-
-# AJUSTE M4
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
-def cargar_modelo():
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    model = PhoenixLSTM(input_size=8, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
+def auditar_ratios():
+    print(f"--- [PHOENIX AUDIT] Buscando la Geometría Rentable en M15 ---")
+    
+    # 1. Cargar Datos
     try:
-        model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
+        df = pd.read_csv(config.DATA_RAW, sep='\t')
+        if len(df.columns) < 2: df = pd.read_csv(config.DATA_RAW, sep=',')
     except:
-        model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location="cpu"))
-    return model.to(device)
-
-def ejecutar_auditoria_profunda():
-    print(f"--- 🕵️ AUDITORÍA FORENSE DE ESTRATEGIA ---")
-    print(f"CONF: {UMBRAL_CONFIANZA} | SL: {ATR_SL}xATR | TP: {ATR_TP}xATR | RIESGO: {RIESGO_PCT*100}%")
-    
-    # Cargar Datos
-    processor = PhoenixDataProcessor(config.DATA_RAW)
-    df = processor.clean_and_prepare()
-    
-    # Usamos SOLO el Test Set (Datos que la IA nunca vio)
-    split_idx = int(len(df) * 0.8)
-    df_test = df.iloc[split_idx:].copy()
-    
-    scaler = joblib.load(config.SCALER_SAVE_PATH)
-    model = cargar_modelo()
-    device = next(model.parameters()).device
-    
-    # Pre-cálculo features
-    features = ['Open', 'High', 'Low', 'Close', 'Volume', 'ATR', 'Vol_Z', 'Dist_EMA200']
-    data_scaled = scaler.transform(df_test[features])
-    
-    capital = CAPITAL_INICIAL
-    balance_history = [capital]
-    trades = []
-    
-    i = config.LOOKBACK_WINDOW
-    print(f"--- Analizando {len(df_test)} velas en busca de grietas... ---")
-    
-    while i < len(df_test) - 50:
-        window = data_scaled[i-config.LOOKBACK_WINDOW : i]
-        tensor_x = torch.tensor(window, dtype=torch.float32).unsqueeze(0).to(device)
-        
-        with torch.no_grad():
-            out = model(tensor_x)
-            probs = torch.nn.functional.softmax(out, dim=1)
-            conf, pred = torch.max(probs, dim=1)
-            
-        pred_idx = pred.item()
-        conf_val = conf.item()
-        atr = df_test['ATR'].iloc[i]
-        
-        # GATILLO
-        if pred_idx != 0 and conf_val > UMBRAL_CONFIANZA and atr > 0.15:
-            entry_price = df_test['Close'].iloc[i]
-            entry_time = df_test.index[i]
-            
-            sl_dist = atr * ATR_SL
-            tp_dist = atr * ATR_TP
-            
-            # Gestión Monetaria
-            riesgo_usd = capital * RIESGO_PCT
-            lotes = max(riesgo_usd / (sl_dist * config.VALOR_PUNTO), 0.01)
-            
-            is_buy = (pred_idx == 1)
-            sl = entry_price - sl_dist if is_buy else entry_price + sl_dist
-            tp = entry_price + tp_dist if is_buy else entry_price - tp_dist
-            
-            # Simulación Vela a Vela
-            outcome = "TIME"
-            pnl = 0
-            duration = 0
-            
-            for j in range(1, 60): # Dejar correr hasta 5 horas (60 velas M5)
-                idx = i + j
-                if idx >= len(df_test): break
-                
-                high = df_test['High'].iloc[idx]
-                low = df_test['Low'].iloc[idx]
-                
-                if is_buy:
-                    if low <= sl: outcome = "SL"; break
-                    if high >= tp: outcome = "TP"; break
-                else:
-                    if high >= sl: outcome = "SL"; break
-                    if low <= tp: outcome = "TP"; break
-                duration = j
-            
-            # Calcular PnL Real
-            if outcome == "TP":
-                pnl = abs(tp - entry_price) * lotes * config.VALOR_PUNTO
-            elif outcome == "SL":
-                pnl = -abs(entry_price - sl) * lotes * config.VALOR_PUNTO
-            else:
-                exit_price = df_test['Close'].iloc[i+duration]
-                pnl = (exit_price - entry_price) * lotes if is_buy else (entry_price - exit_price) * lotes
-            
-            capital += pnl
-            balance_history.append(capital)
-            
-            trades.append({
-                'Time': entry_time,
-                'Type': 'BUY' if is_buy else 'SELL',
-                'Outcome': outcome,
-                'PnL': pnl,
-                'Lotes': lotes,
-                'Duration': duration * 5 # Minutos
-            })
-            
-            i += duration # Saltar velas del trade
-        i += 1
-        
-    # --- INFORME FORENSE ---
-    df_trades = pd.DataFrame(trades)
-    
-    if len(df_trades) == 0:
-        print("❌ NO SE ENCONTRARON OPERACIONES CON ESTOS PARÁMETROS.")
+        print("❌ Error: No encuentro el archivo de datos.")
         return
 
-    # Métricas Avanzadas
-    total_trades = len(df_trades)
-    wins = df_trades[df_trades['PnL'] > 0]
-    losses = df_trades[df_trades['PnL'] <= 0]
+    # Limpieza básica
+    col_map = {}
+    for col in df.columns:
+        c = col.upper().replace('<', '').replace('>', '')
+        if 'CLOSE' in c: col_map[col] = 'Close'
+        elif 'HIGH' in c: col_map[col] = 'High'
+        elif 'LOW' in c: col_map[col] = 'Low'
+    df = df.rename(columns=col_map)
+    df = df[['High', 'Low', 'Close']].astype(float)
     
-    gross_profit = wins['PnL'].sum()
-    gross_loss = abs(losses['PnL'].sum())
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999
+    # Calcular ATR
+    df['PrevClose'] = df['Close'].shift(1)
+    df['TR'] = np.maximum(df['High'] - df['Low'], 
+                          np.maximum(abs(df['High'] - df['PrevClose']), 
+                                     abs(df['Low'] - df['PrevClose'])))
+    df['ATR'] = df['TR'].rolling(14).mean()
+    df.dropna(inplace=True)
     
-    # Rachas
-    df_trades['Win'] = df_trades['PnL'] > 0
-    df_trades['Streak'] = df_trades['Win'].ne(df_trades['Win'].shift()).cumsum()
-    streaks = df_trades.groupby('Streak')['Win'].agg(['first', 'count'])
-    max_consecutive_wins = streaks[streaks['first']]['count'].max() if not streaks[streaks['first']].empty else 0
-    max_consecutive_losses = streaks[~streaks['first']]['count'].max() if not streaks[~streaks['first']].empty else 0
+    print(f"📊 Analizando {len(df)} velas M15...")
     
-    print("\n" + "="*50)
-    print(f"📊 REPORTE DE ESTRATEGIA (PHOENIX v2.1)")
-    print("="*50)
-    print(f"Capital Inicial:    ${CAPITAL_INICIAL:.2f}")
-    print(f"Capital Final:      ${capital:.2f} (Rendimiento: {((capital-CAPITAL_INICIAL)/CAPITAL_INICIAL)*100:.2f}%)")
-    print("-" * 50)
-    print(f"Total Operaciones:  {total_trades}")
-    print(f"Win Rate:           {(len(wins)/total_trades)*100:.2f}%")
-    print(f"Profit Factor:      {profit_factor:.2f} (Objetivo > 1.5)")
-    print("-" * 50)
-    print(f"Ganancia Promedio:  ${wins['PnL'].mean():.2f}")
-    print(f"Pérdida Promedio:   ${losses['PnL'].mean():.2f}")
-    print(f"Ratio Promedio:     1 : {abs(wins['PnL'].mean() / losses['PnL'].mean()):.2f}")
-    print("-" * 50)
-    print(f"🔥 Racha Ganadora Max:  {max_consecutive_wins} trades")
-    print(f"❄️ Racha Perdedora Max: {max_consecutive_losses} trades (OJO AQUÍ)")
-    print(f"⏳ Duración Media:      {df_trades['Duration'].mean():.0f} minutos")
-    print("="*50)
+    # 2. Grid Search de Ratios (Fuerza Bruta)
+    # Probamos combinaciones de SL y TP (multiplicadores de ATR)
+    ratios = [
+        (1.0, 1.0), # 1:1 Scalping equilibrado
+        (1.0, 1.5), # 1:1.5 Ligera ventaja
+        (1.0, 2.0), # 1:2 Trend Following
+        (1.5, 1.5), # 1:1 Con más aire
+        (0.5, 0.5), # Scalping ultra-rápido (HFT)
+        (0.5, 1.0), # Sniper Scalping
+        (2.0, 4.0)  # Swing Trading agresivo
+    ]
     
-    # Alerta de Seguridad
-    if max_consecutive_losses > 6:
-        print("⚠️ ADVERTENCIA: La racha de pérdidas es alta. Asegúrate de tener estómago para aguantar.")
-    elif profit_factor < 1.2:
-        print("⚠️ ADVERTENCIA: El Profit Factor es muy bajo. El riesgo de ruina es real.")
-    else:
-        print("✅ ESTRATEGIA ROBUSTA: Aprobada para fase de pruebas en vivo.")
+    best_score = -9999
+    best_config = None
+    
+    print(f"\n{'SL(ATR)':<8} | {'TP(ATR)':<8} | {'WIN RATE':<10} | {'EV (Esp. Mat)':<12} | {'CALIDAD'}")
+    print("-" * 65)
+    
+    for sl_mult, tp_mult in ratios:
+        wins = 0
+        losses = 0
+        
+        # Simulación Vectorizada Rápida (Aprox) sobre 5000 velas aleatorias para velocidad
+        # O sobre todo el dataset si es rápido
+        sample_idxs = np.linspace(0, len(df)-200, 5000, dtype=int)
+        
+        for i in sample_idxs:
+            entry = df['Close'].iloc[i]
+            atr = df['ATR'].iloc[i]
+            
+            sl_dist = atr * sl_mult
+            tp_dist = atr * tp_mult
+            
+            # Asumimos COMPRA aleatoria para ver la estructura del mercado
+            # Si el mercado tiene sesgo alcista/bajista se notará, pero buscamos volatilidad
+            # Chequeamos las siguientes 20 velas
+            future_highs = df['High'].iloc[i+1:i+21].values
+            future_lows = df['Low'].iloc[i+1:i+21].values
+            
+            hit_tp = False
+            hit_sl = False
+            
+            for h, l in zip(future_highs, future_lows):
+                if l <= (entry - sl_dist): hit_sl = True
+                if h >= (entry + tp_dist): hit_tp = True
+                
+                if hit_sl and hit_tp: 
+                    losses += 1 # Pesimismo: SL primero
+                    break
+                elif hit_sl:
+                    losses += 1
+                    break
+                elif hit_tp:
+                    wins += 1
+                    break
+        
+        total = wins + losses
+        if total == 0: continue
+        
+        win_rate = (wins / total) * 100
+        # Esperanza Matemática por trade (en unidades de ATR)
+        # EV = (ProbWin * Reward) - (ProbLoss * Risk)
+        ev = ((win_rate/100) * tp_mult) - ((1 - (win_rate/100)) * sl_mult)
+        
+        calidad = "💀"
+        if ev > 0: calidad = "✅"
+        if ev > 0.1: calidad = "🔥 GEM"
+        
+        print(f"{sl_mult:<8} | {tp_mult:<8} | {win_rate:<9.1f}% | {ev:<12.3f} | {calidad}")
+        
+        if ev > best_score:
+            best_score = ev
+            best_config = (sl_mult, tp_mult)
+
+    print("-" * 65)
+    print(f"💡 RECOMENDACIÓN TÉCNICA: Usa SL={best_config[0]} ATR y TP={best_config[1]} ATR")
+    print(f"   (Esto alinea tu bot con la realidad física del Oro)")
 
 if __name__ == "__main__":
-    ejecutar_auditoria_profunda()
+    auditar_ratios()

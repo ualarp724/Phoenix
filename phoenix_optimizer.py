@@ -1,145 +1,136 @@
+import phoenix_config as config
+
+if config.MODEL_TYPE == "xgboost":
+    raise SystemExit("Optimizer LSTM no aplica en modo XGBoost.")
+
 import torch
 import pandas as pd
 import numpy as np
-import joblib
-import os
-import time
+import gc
 from phoenix_processor import PhoenixDataProcessor
-from phoenix_brain import PhoenixLSTM
-import phoenix_config as config
+from phoenix_brain import PhoenixLSTM, preparar_secuencias
+from torch.utils.data import DataLoader, TensorDataset
+import torch.nn as nn
+import torch.optim as optim
 
-# AJUSTE PARA M4
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+# --- CONFIGURACIÓN DE BÚSQUEDA ---
+UMBRALES_TEST = [0.50, 0.55, 0.60, 0.65, 0.70] # Niveles de exigencia a probar
+CAPITAL_BASE = 200.0
+LEVERAGE = 500.0
+COMISION_0_01 = 0.06
 
-def cargar_modelo():
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    # Aseguramos input_size=8 (Versión V2)
-    model = PhoenixLSTM(input_size=8, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
+# Ajustes de Entreno
+DIAS_ENTRENAMIENTO = 600
+BATCH_SIZE = 64
+EPOCHS = 60 
+
+if torch.backends.mps.is_available(): DEVICE = torch.device("mps"); print("🚀 M4 GPU ACTIVA")
+else: DEVICE = torch.device("cpu")
+
+def calcular_pesos(y_tensor):
+    classes, counts = np.unique(y_tensor.numpy(), return_counts=True)
+    weights = 1.0 / counts
+    return torch.tensor(weights / weights.sum(), dtype=torch.float32).to(DEVICE)
+
+def entrenar_modelo(df_train):
+    print(f"🧠 Entrenando IA Base ({EPOCHS} épocas)...")
     try:
-        model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
-    except:
-        # Fallback a CPU si hay problemas de mapeo
-        model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location="cpu"))
-    return model.to(device)
-
-def simular_escenario(model, scaler, df_test, umbral_confianza):
-    capital = config.CAPITAL_INICIAL
-    wins, losses = 0, 0
-    drawdown_max = 0
-    pico_capital = capital
-    
-    # Pre-cálculo de tensores para velocidad (Vectorización parcial)
-    features_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'ATR', 'Vol_Z', 'Dist_EMA200']
-    data_scaled = scaler.transform(df_test[features_cols])
-    device = next(model.parameters()).device
-    
-    # Bucle rápido
-    i = config.LOOKBACK_WINDOW
-    while i < len(df_test) - 50:
-        # Ventana
-        window = data_scaled[i-config.LOOKBACK_WINDOW : i]
-        tensor_x = torch.tensor(window, dtype=torch.float32).unsqueeze(0).to(device)
+        X_base, y_base, scaler = preparar_secuencias(df_train)
+        weights = calcular_pesos(y_base)
+        loader = DataLoader(TensorDataset(X_base, y_base), batch_size=BATCH_SIZE, shuffle=True)
         
+        model = PhoenixLSTM(input_size=7, hidden_layers=[128, 64], num_classes=3).to(DEVICE)
+        opt = optim.Adam(model.parameters(), lr=0.001)
+        crit = nn.CrossEntropyLoss(weight=weights)
+        
+        model.train()
+        for ep in range(EPOCHS):
+            for bx, by in loader:
+                bx, by = bx.to(DEVICE), by.to(DEVICE)
+                opt.zero_grad()
+                loss = crit(model(bx), by)
+                loss.backward()
+                opt.step()
+        model.eval()
+        return model, scaler
+    except Exception as e:
+        print(f"❌ Error Entreno: {e}")
+        return None, None
+
+def simular_escenario(model, tensor_test, df_test, umbral):
+    capital = CAPITAL_BASE
+    wins, ops = 0, 0
+    drawdown_max = 0.0
+    peak = capital
+    
+    # Bucle rápido vectorizado (simulado)
+    # Para precisión, usamos el bucle lento intra-vela
+    for i in range(config.LOOKBACK_WINDOW, len(df_test)-20):
+        if capital < 20: break # Quemada
+        
+        # Filtro Horario
+        h = df_test.index[i].hour
+        if h < 9 or h >= 19: continue
+
+        window = tensor_test[i-config.LOOKBACK_WINDOW:i].unsqueeze(0).to(DEVICE)
         with torch.no_grad():
-            out = model(tensor_x)
-            probs = torch.nn.functional.softmax(out, dim=1)
-            confianza, prediccion = torch.max(probs, dim=1)
-            pred = prediccion.item()
-            conf = confianza.item()
+            prob = torch.nn.functional.softmax(model(window), dim=1)
+            conf, pred = torch.max(prob, dim=1)
+            conf, pred = conf.item(), pred.item()
         
-        atr_actual = df_test['ATR'].iloc[i]
-        
-        # --- FILTRO DINÁMICO ---
-        if pred != 0 and conf > umbral_confianza and atr_actual > 0.15:
-            precio_entry = df_test['Close'].iloc[i]
-            sl_dist = atr_actual * config.ATR_SL_MULTIPLIER
-            tp_dist = sl_dist * config.ATR_TP_MULTIPLIER
+        if pred != 0 and conf > umbral:
+            # DATOS M15
+            price = df_test['Close'].iloc[i]
+            atr = df_test['NATR'].iloc[i] * price / 100
             
-            # Cálculo de Lotes (Riesgo constante)
-            riesgo_dinero = capital * config.RIESGO_POR_OPERACION
-            lotes = max(riesgo_dinero / (sl_dist * config.VALOR_PUNTO), 0.01)
+            # Targets M15
+            sl_dist = max(atr * 1.5, 1.0)
+            tp_dist = max(atr * 2.5, 2.0)
             
-            if pred == 1: # BUY
-                sl = precio_entry - sl_dist
-                tp = precio_entry + tp_dist
-            else: # SELL
-                sl = precio_entry + sl_dist
-                tp = precio_entry - tp_dist
+            # LOTE FIJO 0.01 (Para testear la estrategia pura, sin martingalas)
+            lotes = 0.01
             
-            # Resultado (Simplificado para velocidad)
-            outcome = 0 # 0: Neutral, >0 Win, <0 Loss
-            j = 0
-            for j in range(1, 48): # 4 horas
-                idx = i + j
-                if idx >= len(df_test): break
-                high = df_test['High'].iloc[idx]
-                low = df_test['Low'].iloc[idx]
+            margin = (price * 100 * lotes) / LEVERAGE
+            if capital > margin:
+                # Simulación Intra-Vela Pesimista
+                pnl = 0
+                tp_p = price + tp_dist if pred == 1 else price - tp_dist
+                sl_p = price - sl_dist if pred == 1 else price + sl_dist
                 
-                if pred == 1:
-                    if low <= sl: outcome = -1; break
-                    if high >= tp: outcome = 1; break
-                else:
-                    if high >= sl: outcome = -1; break
-                    if low <= tp: outcome = 1; break
-            
-            # Aplicar PnL
-            pnl = 0
-            if outcome == 1:
-                pnl = (abs(tp - precio_entry) * lotes * config.VALOR_PUNTO)
-                wins += 1
-            elif outcome == -1:
-                pnl = -(abs(precio_entry - sl) * lotes * config.VALOR_PUNTO)
-                losses += 1
-            else:
-                # Time Exit
-                close_exit = df_test['Close'].iloc[i+j]
-                pnl = (close_exit - precio_entry) * lotes if pred == 1 else (precio_entry - close_exit) * lotes
-            
-            capital += pnl
-            
-            # Calcular Drawdown
-            if capital > pico_capital: pico_capital = capital
-            dd = (pico_capital - capital) / pico_capital
-            if dd > drawdown_max: drawdown_max = dd
-            
-            i += j # Saltar velas
-        i += 1
-        
-    return capital, wins, losses, drawdown_max
+                for j in range(1, 13): # 3 horas futuro
+                    hi = df_test['High'].iloc[i+j]
+                    lo = df_test['Low'].iloc[i+j]
+                    
+                    if pred == 1:
+                        if lo <= sl_p: pnl = -sl_dist*100*lotes; break
+                        if hi >= tp_p: pnl = tp_dist*100*lotes; break
+                    else:
+                        if hi >= sl_p: pnl = -sl_dist*100*lotes; break
+                        if lo <= tp_p: pnl = tp_dist*100*lotes; break
+                
+                # Cierre tiempo
+                if pnl == 0:
+                    exit_p = df_test['Close'].iloc[i+12]
+                    pnl = (exit_p - price)*100*lotes if pred == 1 else (price - exit_p)*100*lotes
+                
+                neto = pnl - COMISION_0_01
+                capital += neto
+                ops += 1
+                if neto > 0: wins += 1
+                
+                # Update Drawdown
+                if capital > peak: peak = capital
+                dd = (peak - capital) / peak
+                if dd > drawdown_max: drawdown_max = dd
 
-def ejecutar_optimizacion():
-    print(f"--- 🧪 PHOENIX OPTIMIZER: Buscando el Santo Grial ---")
-    
-    # Preparar Datos
-    processor = PhoenixDataProcessor(config.DATA_RAW)
-    df = processor.clean_and_prepare()
-    split_idx = int(len(df) * 0.8)
-    df_test = df.iloc[split_idx:].copy()
-    scaler = joblib.load(config.SCALER_SAVE_PATH)
-    model = cargar_modelo()
-    
-    # Rango de Pruebas
-    umbrales = [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
-    
-    print(f"{'UMBRAL':<10} | {'CAPITAL FINAL':<15} | {'WIN RATE':<10} | {'TRADES':<8} | {'MAX DD':<10}")
-    print("-" * 65)
-    
-    mejor_resultado = 0
-    mejor_umbral = 0
-    
-    for u in umbrales:
-        cap, w, l, dd = simular_escenario(model, scaler, df_test, u)
-        total = w + l # Aproximado (sin contar time exits neutros para ratio rápido)
-        wr = (w / total * 100) if total > 0 else 0
-        
-        print(f"{u:<10.2f} | ${cap:<14.2f} | {wr:<9.1f}% | {total:<8} | {dd*100:.1f}%")
-        
-        if cap > mejor_resultado:
-            mejor_resultado = cap
-            mejor_umbral = u
-            
-    print("-" * 65)
-    print(f"🏆 MEJOR CONFIGURACIÓN: Umbral {mejor_umbral} (Ganancia: ${(mejor_resultado - config.CAPITAL_INICIAL):.2f})")
+    return capital, ops, wins, drawdown_max
+
+def ejecutar_optimizador():
+    from phoenix_parameter_optimizer_v2 import FastParameterOptimizer
+
+    print("⚠️  phoenix_optimizer.py está deprecado. Usando optimizer v2.")
+    optimizer = FastParameterOptimizer(config.MODEL_SAVE_PATH, config.SCALER_SAVE_PATH)
+    optimizer.optimizar()
 
 if __name__ == "__main__":
-    ejecutar_optimizacion()
+    ejecutar_optimizador()

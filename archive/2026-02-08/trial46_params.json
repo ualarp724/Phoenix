@@ -1,0 +1,16 @@
+{
+  "max_depth": 4,
+  "n_estimators": 450,
+  "learning_rate": 0.04230458647489199,
+  "min_child_weight": 1,
+  "gamma": 0.06504379175132392,
+  "subsample": 0.9393916691080864,
+  "colsample_bytree": 0.680370856457481,
+  "reg_alpha": 0.0023535310962954858,
+  "reg_lambda": 1.1760005114606702,
+  "max_delta_step": 0,
+  "umbral_buy": 0.2921117047116195,
+  "umbral_sell": 0.20779352363315906,
+  "sl_mult": 0.8061332986360159,
+  "tp_rr": 2.9141855045951965
+}

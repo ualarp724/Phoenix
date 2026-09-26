@@ -1,3 +1,32 @@
+# --- Entornos virtuales ---
 venv_stable/
+.venv/
+venv/
 .env
+
+# --- Python ---
 __pycache__/
+*.pyc
+.pytest_cache/
+
+# --- macOS ---
+.DS_Store
+
+# --- Datos (se exportan de MT5, no van a git) ---
+data/
+*.csv
+
+# --- Modelos y artefactos generados ---
+*.pkl
+*.pkl.bak
+*.pth
+*.onnx
+*.onnx.data
+phoenix_btc_ensemble_lgbm.txt
+
+# --- Salidas ---
+logs/
+*.log
+*.db
+reports/
+*.png

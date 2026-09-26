@@ -1,9 +1,13 @@
+import phoenix_config as config
+
+if config.MODEL_TYPE == "xgboost":
+    raise SystemExit("Sniper search LSTM no aplica en modo XGBoost.")
+
 import torch
 import pandas as pd
 import numpy as np
 import joblib
 import os
-import phoenix_config as config
 from phoenix_brain import PhoenixLSTM
 from phoenix_processor import PhoenixDataProcessor
 
@@ -12,7 +16,7 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 def cargar_modelo():
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    model = PhoenixLSTM(input_size=8, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
+    model = PhoenixLSTM(input_size=config.INPUT_SIZE, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
     try:
         model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
     except:
@@ -99,52 +103,11 @@ def test_sniper(model, scaler, df_test, sl_mult, tp_mult, umbral):
     return capital, max_dd, wins, total_ops
 
 def ejecutar_busqueda_sniper():
-    print(f"--- 🎯 BUSCANDO CONFIGURACIÓN SNIPER (Objetivo: WR > 60%, DD < 20%) ---")
-    
-    processor = PhoenixDataProcessor(config.DATA_RAW)
-    df = processor.clean_and_prepare()
-    df_test = df.iloc[int(len(df)*0.8):].copy()
-    scaler = joblib.load(config.SCALER_SAVE_PATH)
-    model = cargar_modelo()
-    
-    # MATRIZ DE SCALPING / ALTA PROBABILIDAD
-    # Probamos Ratios más ajustados (1:1, 1:1.5) que favorecen el Win Rate
-    sl_opts = [1.0, 1.5, 2.0]     
-    tp_opts = [1.0, 1.2, 1.5, 2.0] # TP más cortos = Más aciertos
-    umbrales = [0.80, 0.85, 0.90]  # Confianza alta
-    
-    print(f"{'CONF':<5} | {'SL':<4} | {'TP':<4} | {'WIN RATE':<9} | {'MAX DD':<8} | {'PROFIT':<10} | {'OPS':<5}")
-    print("-" * 75)
-    
-    candidatos = []
-    
-    for umbral in umbrales:
-        for sl in sl_opts:
-            for tp in tp_opts:
-                cap, dd, wins, ops = test_sniper(model, scaler, df_test, sl, tp, umbral)
-                
-                if ops < 10: continue # Ignorar si opera muy poco
-                
-                wr = (wins / ops) * 100
-                profit = cap - config.CAPITAL_INICIAL
-                
-                # SOLO MOSTRAR SI CUMPLE CRITERIOS MÍNIMOS
-                if wr > 50 and dd < 0.25:
-                    print(f"{umbral:<5} | {sl:<4} | {tp:<4} | {wr:<8.1f}% | {dd*100:<7.1f}% | ${profit:<9.2f} | {ops:<5}")
-                    
-                    if wr >= 60 and dd <= 0.20:
-                        candidatos.append((profit, wr, dd, umbral, sl, tp))
-    
-    print("-" * 75)
-    if candidatos:
-        # Ordenar por Win Rate
-        candidatos.sort(key=lambda x: x[1], reverse=True)
-        best = candidatos[0]
-        print(f"🏆 MEJOR SNIPER: Conf {best[3]} | SL {best[4]} | TP {best[5]}")
-        print(f"   Win Rate: {best[1]:.1f}% | DD: {best[2]*100:.1f}% | Profit: ${best[0]:.2f}")
-    else:
-        print("⚠️ No se encontró una configuración perfecta >60% WR y <20% DD.")
-        print("Recomendación: Usa la que tenga mayor Profit de la lista de arriba.")
+    from phoenix_parameter_optimizer_v2 import FastParameterOptimizer
+
+    print("⚠️  phoenix_sniper_search.py está deprecado. Usando optimizer v2.")
+    optimizer = FastParameterOptimizer(config.MODEL_SAVE_PATH, config.SCALER_SAVE_PATH)
+    optimizer.optimizar()
 
 if __name__ == "__main__":
     ejecutar_busqueda_sniper()

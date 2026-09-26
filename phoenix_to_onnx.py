@@ -1,18 +1,22 @@
+import phoenix_config as config
+
+if config.MODEL_TYPE == "xgboost":
+    raise SystemExit("Exportación ONNX LSTM no aplica en modo XGBoost.")
+
 import torch
 import onnx
 import os
 from phoenix_brain import PhoenixLSTM
-import phoenix_config as config
 
 def exportar_precision():
     print("--- [SISTEMA] Exportando Cerebro de Precisión (Monolítico) ---")
-    model = PhoenixLSTM(input_size=6, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
+    model = PhoenixLSTM(input_size=config.INPUT_SIZE, hidden_layers=config.HIDDEN_LAYERS, num_classes=3)
     
     # Cargamos el archivo de endurecimiento
     model.load_state_dict(torch.load("phoenix_brain_precision.pth", map_location='cpu'))
     model.eval()
     
-    dummy_input = torch.randn(1, config.LOOKBACK_WINDOW, 6)
+    dummy_input = torch.randn(1, config.LOOKBACK_WINDOW, config.INPUT_SIZE)
     temp_name = "temp_precision.onnx"
     final_name = "phoenix_brain.onnx"
 

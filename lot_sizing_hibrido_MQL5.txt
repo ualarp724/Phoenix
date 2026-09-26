@@ -1,0 +1,23 @@
+# Lógica de lot sizing híbrido para orquestador MQL5
+
+"""
+- Lote fijo 0.01 hasta que el balance supere $500 USD.
+- A partir de $500, calcular lote óptimo según riesgo:
+    lot_size = max(0.01, min((balance * 0.015) / (stop_loss_pips * pip_value), 0.03))
+    # pip_value depende del activo (ej: 0.10 para XAUUSD micro, 0.01 para NAS100, 0.01 para BTCUSD)
+- Nunca exceder 0.03 lotes ni arriesgar más de 1.5% del balance por operación.
+- Si balance < $200, pausar trading.
+- Si pérdida diaria > $12, pausar trading.
+
+Ejemplo MQL5:
+
+   double lot = 0.01;
+   if (AccountInfoDouble(ACCOUNT_BALANCE) > 500) {
+      double risk_usd = AccountInfoDouble(ACCOUNT_BALANCE) * 0.015;
+      double pip_value = ...; // según símbolo
+      lot = MathMax(0.01, MathMin(risk_usd / (stop_loss_pips * pip_value), 0.03));
+   }
+   // Validar límites antes de enviar orden
+"""
+
+# Guardar este archivo junto a los .onnx exportados para referencia del desarrollador MQL5.

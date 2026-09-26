@@ -1,0 +1,30 @@
+{
+  "name": "NAS100_M15_DD20_BEST",
+  "source_log": "reports/optuna_logs/nas100_m15_50_dd20.log",
+  "best_trial": 45,
+  "score": 449.7718928395208,
+  "params": {
+    "max_depth": 7,
+    "n_estimators": 400,
+    "learning_rate": 0.08191543600775775,
+    "min_child_weight": 18,
+    "gamma": 0.04002977056824604,
+    "subsample": 0.7040888533213995,
+    "colsample_bytree": 0.9479967961426029,
+    "reg_alpha": 0.24734603883420186,
+    "reg_lambda": 1.5820435740218484,
+    "max_delta_step": 1,
+    "sl_mult": 1.8615518611351882,
+    "tp_rr": 2.1537488053091494,
+    "umbral_buy": 0.10960588546642797,
+    "umbral_sell": 0.17351048273911876
+  },
+  "metrics": {
+    "profit": 449.77,
+    "winrate": 51.9,
+    "sharpe": 4.12,
+    "dd": 14.38,
+    "trades_per_day": 4.59,
+    "score": 449.7719
+  }
+}
