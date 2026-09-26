@@ -48,7 +48,7 @@ def download(start: str = "2023-01", end: pd.Timestamp | None = None, symbol: st
     return got
 
 
-def _read_zip(path: Path) -> pd.DataFrame:
+def read_zip(path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(path) as z:
         df = pd.read_csv(z.open(z.namelist()[0]), header=None, names=COLS)
     if not str(df.iloc[0, 0]).isdigit():  # algunos archivos traen cabecera
@@ -63,7 +63,7 @@ def load(start: str | None = None) -> pd.DataFrame:
     files = sorted(DATA_DIR.glob("*.zip"))
     if start:
         files = [f for f in files if f.stem.split("-1m-")[1] >= start]
-    df = pd.concat([_read_zip(f) for f in files]).sort_index()
+    df = pd.concat([read_zip(f) for f in files]).sort_index()
     df = df[~df.index.duplicated(keep="last")]
     df.index.name = "time_utc"
     return df

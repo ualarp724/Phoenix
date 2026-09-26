@@ -78,3 +78,22 @@ Scripts: `research/05_descargar_btc5m.py` (descarga), `06_backtest_btc5m.py` (ba
 `07_retraso_chainlink.py` (retraso del precio de referencia). El resumen de precios por mercado
 está en `data/raw/polymarket_btc5m_resumen.csv.gz`, así que el backtest se puede repetir sin
 volver a descargar las operaciones. Desde España la API de Polymarket está bloqueada por la DGOJ.
+
+## Bot de alto riesgo: perpetuo de BTC en Kraken (`phoenix/perps/`)
+
+Objetivo que pidió Arturo: intentar pasar de 100 € a 500 € en un mes, aceptando perderlos.
+Estrategia S4 de `research/08_bot_arriesgado.md`: ruptura de 20 velas de 4 h a favor de la
+tendencia de ~50 días, stop de 2 ATR, 30 % de riesgo por operación, 9x como máximo y piramidar.
+En simulación llega a 500 € en ~11 % de los meses (16,7 % en el test de 2026); el resultado
+mediano es acabar con unos 70–80 €.
+
+```bash
+cp .env.example .env            # y pega tus claves (sin permiso de retirada)
+python -m phoenix.perps.bot --mode dry           # simulación con velas reales
+python -m phoenix.perps.bot --mode demo --check  # comprobar la cuenta demo
+python -m phoenix.perps.bot --mode demo          # operar con dinero ficticio
+python -m phoenix.perps.bot --mode live --i-accept-losing-everything
+```
+
+El stop y el objetivo quedan en Kraken, así que si el Mac se apaga la posición sigue protegida;
+el bot solo tiene que estar encendido para abrir, piramidar y mover el stop cada 4 horas.
